@@ -4,6 +4,7 @@ require 'envutil'
 require 'drb/drb'
 require 'drb/extservm'
 require 'timeout'
+require_relative 'drbtest_utils'
 
 module DRbTests
 
@@ -391,6 +392,92 @@ module DRbAry
   end
 EOS
 
+end
+
+# A PQC Utilities module inspired from ruby/rubygems omit_unless_support_pqc
+module DRbPQCUtilities
+  # PQC algorithms ML-KEM and ML-DSA require OpenSSL >= 3.5.
+  # https://openssl-library.org/post/2025-04-08-openssl-35-final-release/
+  def support_pqc_openssl?
+    OpenSSL::OPENSSL_VERSION_NUMBER >= 0x30500000
+  end
+
+  # Ruby OpenSSL >= 4.0 supports OpenSSL::SSL::SSLContext#groups,
+  # OpenSSL::SSL::SSLSocket#sigalg, #peer_sigalg used in PQC cases, fixing the
+  # following issue.
+  # https://github.com/ruby/openssl/blob/v4.0.0/History.md#notable-changes
+  # https://github.com/ruby/openssl/commit/9614b7f67a629cc8d31b6fe5be5040c68263ca8b
+  def support_pqc_ruby_openssl?
+    Gem::Version.new(OpenSSL::VERSION) >= Gem::Version.new('4.0')
+  end
+
+  # Probe an actual PQC handshake between a forced-PQC server and a
+  # default-configured client, mirroring what the integration tests exercise.
+  # Memoized so the probe runs at most once per process.
+  def support_pqc_handshake?
+    return @support_pqc_handshake unless @support_pqc_handshake.nil?
+
+    @support_pqc_handshake = probe_pqc_handshake
+  end
+
+  def probe_pqc_handshake
+    server = TCPServer.new('127.0.0.1', 0)
+    ctx = OpenSSL::SSL::SSLContext.new
+    ctx.add_certificate(
+      Fixtures.read_cert('mldsa65_server.crt'),
+      Fixtures.read_pkey('mldsa65_server.key'))
+    ctx.groups = 'X25519MLKEM768'
+    ssl_server = OpenSSL::SSL::SSLServer.new(server, ctx)
+
+    port = server.addr[1]
+    server_thread = Thread.new do
+      client = ssl_server.accept
+      client.close
+    rescue OpenSSL::OpenSSLError
+      nil
+    end
+
+    client_ctx = OpenSSL::SSL::SSLContext.new
+    client_ctx.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    socket = TCPSocket.new('127.0.0.1', port)
+    ssl = OpenSSL::SSL::SSLSocket.new(socket, client_ctx)
+    ssl.connect
+    ssl.close
+    true
+  rescue OpenSSL::OpenSSLError, SystemCallError
+    false
+  ensure
+    server_thread&.join(5)
+    server_thread&.kill if server_thread&.alive?
+    ssl_server&.close
+    server&.close
+  end
+
+  def omit_unless_support_pqc
+    unless support_pqc_openssl?
+      yield if block_given?
+      omit 'PQC algorithms require OpenSSL >= 3.5'
+      return
+    end
+    unless support_pqc_ruby_openssl?
+      yield if block_given?
+      omit 'PQC test requires Ruby OpenSSL >= 4.0'
+      return
+    end
+    unless support_pqc_handshake?
+      yield if block_given?
+      omit 'PQC handshake is not available in this OpenSSL configuration'
+    end
+  end
+end
+
+module DRbPQC
+  include DRbBase
+  include DRbPQCUtilities
+
+  def test_01_hello
+    assert_equal('hello', @there.hello)
+  end
 end
 
 end

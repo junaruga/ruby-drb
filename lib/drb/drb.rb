@@ -463,6 +463,9 @@ module DRb
     attr_reader :reason
   end
 
+  # Error raised when an error occurs on the bad configuration.
+  class DRbBadConfig < DRbError; end
+
   # Class wrapping a marshalled object whose type is unknown locally.
   #
   # If an object is returned by a method invoked over drb, but the

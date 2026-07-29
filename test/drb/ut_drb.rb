@@ -41,6 +41,14 @@ class DRbEx
   end
   attr_reader :hello
 
+  def stream
+    Thread.current['DRb']['client'].stream
+  end
+
+  def stream_class_name
+    stream.class.name
+  end
+
   def sample(a, b, c)
     a.to_i + b.to_i + c.to_i
   end
