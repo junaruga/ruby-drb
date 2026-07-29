@@ -4,6 +4,7 @@ require 'envutil'
 require 'drb/drb'
 require 'drb/extservm'
 require 'timeout'
+require_relative 'fixtures'
 
 module DRbTests
 
@@ -391,6 +392,142 @@ module DRbAry
   end
 EOS
 
+end
+
+# A PQC support module
+# Inspired by ruby/rubygems omit_unless_support_pqc
+module DRbPQC
+  # PQC algorithms ML-KEM and ML-DSA require OpenSSL >= 3.5.
+  # https://openssl-library.org/post/2025-04-08-openssl-35-final-release/
+  # Ruby OpenSSL >= 4.0 has useful methods in PQC use cases.
+  # https://github.com/ruby/openssl/blob/v4.0.0/History.md?plain=1#L25-L35
+  # And fixed the following bug related to PQC.
+  # https://github.com/ruby/openssl/pull/898
+  # However, we don't check OpenSSL and Ruby OpenSSL versions here
+  # for a flexible check for other SSL libraries such as LibreSSL and AWS-LC.
+
+  # Returns the algorithm name from the SubjectPublicKeyInfo of the key.
+  def key_algorithm_name(key)
+    OpenSSL::ASN1.decode(key.public_to_der).value.first.value.first.ln
+  end
+
+  def omit_unless_support_ml_dsa_key
+    unless support_ml_dsa_key?
+      omit 'OpenSSL does not support ML-DSA'
+    end
+  end
+
+  # Returns whether the runtime OpenSSL can generate ML-DSA keys.
+  # Unlike support_pqc_handshake?, this only probes key generation.
+  # Handshake cannot be used to judge ML-DSA key availability on
+  # OpenSSL >= 3.5 with Ruby OpenSSL < 4.0, where support_pqc_handshake? is
+  # false due to Ruby OpenSSL's missing methods but
+  # OpenSSL::PKey.generate_key succeeds.
+  def support_ml_dsa_key?
+    return @support_ml_dsa_key unless @support_ml_dsa_key.nil?
+
+    @support_ml_dsa_key =
+      begin
+        OpenSSL::PKey.generate_key("ML-DSA-65")
+        true
+      rescue OpenSSL::PKey::PKeyError, NoMethodError
+        false
+      end
+  end
+
+  def omit_unless_support_ml_dsa_cert
+    unless support_ml_dsa_cert?
+      omit 'Ruby OpenSSL cannot sign a certificate with an ML-DSA key'
+    end
+  end
+
+  # Returns whether the runtime can sign an X.509 certificate with an ML-DSA
+  # key. Ruby OpenSSL rejects the nil digest needed before 3.3, so
+  # support_ml_dsa_key? alone does not cover certificate building.
+  # DRb::DRbSSLSocket::SSLConfig#setup_certificate tests calling
+  # OpenSSL::X509::Certificate#sign need this method.
+  def support_ml_dsa_cert?
+    return @support_ml_dsa_cert unless @support_ml_dsa_cert.nil?
+
+    @support_ml_dsa_cert =
+      begin
+        key = OpenSSL::PKey.generate_key("ML-DSA-65")
+        cert = OpenSSL::X509::Certificate.new
+        cert.subject = cert.issuer =
+          OpenSSL::X509::Name.new([["CN", "probe"]])
+        cert.public_key = OpenSSL::PKey.read(key.public_to_pem)
+        cert.not_before = Time.now
+        cert.not_after = Time.now + 60
+        cert.sign(key, nil)
+        true
+      # NoMethodError: Old Ruby OpenSSL lacks generate_key.
+      # TypeError: Ruby OpenSSL < 3.3 rejects a nil digest here.
+      rescue OpenSSL::PKey::PKeyError,
+             OpenSSL::X509::CertificateError,
+             NoMethodError, TypeError
+        false
+      end
+  end
+
+  def omit_unless_support_pqc
+    # Even with a new enough OpenSSL, the runtime may keep PQC groups and
+    # signature algorithms out of its default negotiation lists (for example
+    # RHEL's system-wide crypto policies). The PQC server forces both, while
+    # the gem fetcher connects with the default client configuration, so a
+    # real loopback handshake is the only reliable way to tell whether this
+    # environment can negotiate PQC at all.
+    unless support_pqc_handshake?
+      omit 'OpenSSL or Ruby OpenSSL is too old to support PQC, '\
+           'or PQC handshake is not available in this OpenSSL configuration'
+    end
+  end
+
+  # Probe an actual PQC handshake between a forced-PQC server and a
+  # default-configured client, mirroring what the integration tests exercise.
+  # Memoized so the probe runs at most once per process.
+  def support_pqc_handshake?
+    return @support_pqc_handshake unless @support_pqc_handshake.nil?
+
+    @support_pqc_handshake = probe_pqc_handshake
+  end
+
+  def probe_pqc_handshake
+    TCPServer.open('127.0.0.1', 0) do |server|
+      ctx = OpenSSL::SSL::SSLContext.new
+      cert = Fixtures.read_cert('mldsa65_server.crt')
+      pkey = Fixtures.read_pkey('mldsa65_server.key')
+      ctx.add_certificate(cert, pkey)
+
+      # ctx.groups (OpenSSL::SSL::SSLContext#groups) requires Ruby OpenSSL >=
+      # 4.0.
+      return nil unless ctx.respond_to?(:groups=)
+
+      ctx.groups = 'X25519MLKEM768'
+      ssl_server = OpenSSL::SSL::SSLServer.new(server, ctx)
+
+      port = server.addr[1]
+      server_thread = Thread.new do
+        client = ssl_server.accept
+        client.close
+      rescue OpenSSL::OpenSSLError
+        nil
+      end
+
+      client_ctx = OpenSSL::SSL::SSLContext.new
+      client_ctx.verify_mode = OpenSSL::SSL::VERIFY_NONE
+      TCPSocket.open('127.0.0.1', port) do |socket|
+        ssl = OpenSSL::SSL::SSLSocket.new(socket, client_ctx)
+        ssl.connect
+        ssl.close
+      end
+      true
+    rescue OpenSSL::PKey::PKeyError, OpenSSL::OpenSSLError, SystemCallError
+      false
+    ensure
+      server_thread&.kill
+      ssl_server&.close
+    end
+  end
 end
 
 end
