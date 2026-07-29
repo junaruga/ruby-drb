@@ -4,6 +4,7 @@ require 'envutil'
 require 'drb/drb'
 require 'drb/extservm'
 require 'timeout'
+require_relative 'fixtures'
 
 module DRbTests
 
@@ -391,6 +392,78 @@ module DRbAry
   end
 EOS
 
+end
+
+# A PQC support module
+# Inspired by ruby/rubygems omit_unless_support_pqc
+module DRbPQC
+  # PQC algorithms ML-KEM and ML-DSA require OpenSSL >= 3.5.
+  # https://openssl-library.org/post/2025-04-08-openssl-35-final-release/
+  # Ruby OpenSSL >= 4.0 has useful methods in PQC use cases.
+  # https://github.com/ruby/openssl/blob/v4.0.0/History.md?plain=1#L25-L35
+  # And fixed the following bug related to PQC.
+  # https://github.com/ruby/openssl/pull/898
+  # However, we don't check OpenSSL and Ruby OpenSSL versions here
+  # for a flexible check for other SSL libraries such as LibreSSL and AWS-LC.
+  def omit_unless_support_pqc
+    # Even with a new enough OpenSSL, the runtime may keep PQC groups and
+    # signature algorithms out of its default negotiation lists (for example
+    # RHEL's system-wide crypto policies). The PQC server forces both, while
+    # the gem fetcher connects with the default client configuration, so a
+    # real loopback handshake is the only reliable way to tell whether this
+    # environment can negotiate PQC at all.
+    unless support_pqc_handshake?
+      omit 'OpenSSL or Ruby OpenSSL is too old to support PQC, '\
+           'or PQC handshake is not available in this OpenSSL configuration'
+    end
+  end
+
+  # Probe an actual PQC handshake between a forced-PQC server and a
+  # default-configured client, mirroring what the integration tests exercise.
+  # Memoized so the probe runs at most once per process.
+  def support_pqc_handshake?
+    return @support_pqc_handshake unless @support_pqc_handshake.nil?
+
+    @support_pqc_handshake = probe_pqc_handshake
+  end
+
+  def probe_pqc_handshake
+    TCPServer.open('127.0.0.1', 0) do |server|
+      ctx = OpenSSL::SSL::SSLContext.new
+      cert = Fixtures.read_cert('mldsa65_server.crt')
+      pkey = Fixtures.read_pkey('mldsa65_server.key')
+      ctx.add_certificate(cert, pkey)
+
+      # ctx.groups (OpenSSL::SSL::SSLContext#groups) requires Ruby OpenSSL >=
+      # 4.0.
+      return nil unless ctx.respond_to?(:groups=)
+
+      ctx.groups = 'X25519MLKEM768'
+      ssl_server = OpenSSL::SSL::SSLServer.new(server, ctx)
+
+      port = server.addr[1]
+      server_thread = Thread.new do
+        client = ssl_server.accept
+        client.close
+      rescue OpenSSL::OpenSSLError
+        nil
+      end
+
+      client_ctx = OpenSSL::SSL::SSLContext.new
+      client_ctx.verify_mode = OpenSSL::SSL::VERIFY_NONE
+      TCPSocket.open('127.0.0.1', port) do |socket|
+        ssl = OpenSSL::SSL::SSLSocket.new(socket, client_ctx)
+        ssl.connect
+        ssl.close
+      end
+      true
+    rescue OpenSSL::PKey::PKeyError, OpenSSL::OpenSSLError, SystemCallError
+      false
+    ensure
+      server_thread&.kill
+      ssl_server&.close
+    end
+  end
 end
 
 end
