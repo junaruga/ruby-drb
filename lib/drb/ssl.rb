@@ -180,7 +180,7 @@ module DRb
         cert.issuer = name
         cert.not_before = Time.now
         cert.not_after = Time.now + (365*24*60*60)
-        cert.public_key = rsa.public_key
+        cert.public_key = rsa
 
         ef = OpenSSL::X509::ExtensionFactory.new(nil,cert)
         cert.extensions = [
