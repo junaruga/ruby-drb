@@ -455,10 +455,11 @@ module DRbPQC
         cert.not_after = Time.now + 60
         cert.sign(key, nil)
         true
+      # NoMethodError: Old Ruby OpenSSL lacks generate_key.
       # TypeError: Ruby OpenSSL < 3.3 rejects a nil digest here.
       rescue OpenSSL::PKey::PKeyError,
              OpenSSL::X509::CertificateError,
-             TypeError
+             NoMethodError, TypeError
         false
       end
   end
