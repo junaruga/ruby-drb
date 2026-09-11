@@ -405,6 +405,64 @@ module DRbPQC
   # https://github.com/ruby/openssl/pull/898
   # However, we don't check OpenSSL and Ruby OpenSSL versions here
   # for a flexible check for other SSL libraries such as LibreSSL and AWS-LC.
+
+  def omit_unless_support_ml_dsa_key
+    unless support_ml_dsa_key?
+      omit 'OpenSSL does not support ML-DSA'
+    end
+  end
+
+  # Returns whether the runtime OpenSSL can generate ML-DSA keys.
+  # Unlike support_pqc_handshake?, this only probes key generation.
+  # Handshake cannot be used to judge ML-DSA key availability on
+  # OpenSSL >= 3.5 with Ruby OpenSSL < 4.0, where support_pqc_handshake? is
+  # false due to Ruby OpenSSL's missing methods but
+  # OpenSSL::PKey.generate_key succeeds.
+  def support_ml_dsa_key?
+    return @support_ml_dsa_key unless @support_ml_dsa_key.nil?
+
+    @support_ml_dsa_key =
+      begin
+        OpenSSL::PKey.generate_key("ML-DSA-65")
+        true
+      rescue OpenSSL::PKey::PKeyError, NoMethodError
+        false
+      end
+  end
+
+  def omit_unless_support_ml_dsa_cert
+    unless support_ml_dsa_cert?
+      omit 'Ruby OpenSSL cannot sign a certificate with an ML-DSA key'
+    end
+  end
+
+  # Returns whether the runtime can sign an X.509 certificate with an ML-DSA
+  # key. Ruby OpenSSL rejects the nil digest needed before 3.3, so
+  # support_ml_dsa_key? alone does not cover certificate building.
+  # DRb::DRbSSLSocket::SSLConfig#setup_certificate tests calling
+  # OpenSSL::X509::Certificate#sign need this method.
+  def support_ml_dsa_cert?
+    return @support_ml_dsa_cert unless @support_ml_dsa_cert.nil?
+
+    @support_ml_dsa_cert =
+      begin
+        key = OpenSSL::PKey.generate_key("ML-DSA-65")
+        cert = OpenSSL::X509::Certificate.new
+        cert.subject = cert.issuer =
+          OpenSSL::X509::Name.new([["CN", "probe"]])
+        cert.public_key = OpenSSL::PKey.read(key.public_to_pem)
+        cert.not_before = Time.now
+        cert.not_after = Time.now + 60
+        cert.sign(key, nil)
+        true
+      # TypeError: Ruby OpenSSL < 3.3 rejects a nil digest here.
+      rescue OpenSSL::PKey::PKeyError,
+             OpenSSL::X509::CertificateError,
+             TypeError
+        false
+      end
+  end
+
   def omit_unless_support_pqc
     # Even with a new enough OpenSSL, the runtime may keep PQC groups and
     # signature algorithms out of its default negotiation lists (for example

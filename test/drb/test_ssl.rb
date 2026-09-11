@@ -42,7 +42,7 @@ class TestSSLConfig < Test::Unit::TestCase
   end
 
   def test_setup_certificate_ml_dsa_44
-    omit_unless_support_pqc
+    omit_unless_support_ml_dsa_cert
 
     config = {
       SSLCertName: CERT_NAME,
@@ -58,7 +58,7 @@ class TestSSLConfig < Test::Unit::TestCase
   end
 
   def test_setup_certificate_ml_dsa_65
-    omit_unless_support_pqc
+    omit_unless_support_ml_dsa_cert
 
     config = {
       SSLCertName: CERT_NAME,
@@ -74,7 +74,7 @@ class TestSSLConfig < Test::Unit::TestCase
   end
 
   def test_setup_certificate_ml_dsa_87
-    omit_unless_support_pqc
+    omit_unless_support_ml_dsa_cert
 
     config = {
       SSLCertName: CERT_NAME,
@@ -90,7 +90,7 @@ class TestSSLConfig < Test::Unit::TestCase
   end
 
   def test_setup_certificate_ml_dsa_65_rsa
-    omit_unless_support_pqc
+    omit_unless_support_ml_dsa_cert
 
     config = {
       SSLCertName: CERT_NAME,
@@ -165,8 +165,8 @@ class TestSSLConfig < Test::Unit::TestCase
     # on Ruby OpenSSL >= 4.0.
     ctx_class = OpenSSL::SSL::SSLContext
     omit 'sigalgs= not supported' unless ctx_class.method_defined?(:sigalgs=)
-    # Requires PQC support on OpenSSL >= 3.5.
-    omit_unless_support_pqc
+    # Requires ML-DSA key support on OpenSSL >= 3.5.
+    omit_unless_support_ml_dsa_key
 
     config = {
       SSLCertificates: [
@@ -207,7 +207,7 @@ class TestSSLConfig < Test::Unit::TestCase
     unless ctx_class.method_defined?(:client_sigalgs=)
       omit 'client_sigalgs= not supported'
     end
-    omit_unless_support_pqc
+    omit_unless_support_ml_dsa_key
 
     config = {
       SSLCertificate: Fixtures.read_cert('mldsa65_server.crt'),
@@ -266,7 +266,7 @@ class TestSSLConfig < Test::Unit::TestCase
   def test_setup_ssl_context_groups_pqc
     ctx_class = OpenSSL::SSL::SSLContext
     omit 'groups= not supported' unless ctx_class.method_defined?(:groups=)
-    omit_unless_support_pqc
+    omit_unless_support_ml_dsa_key
 
     config = {
       SSLCertificate: Fixtures.read_cert('mldsa65_server.crt'),
