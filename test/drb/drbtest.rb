@@ -406,6 +406,11 @@ module DRbPQC
   # However, we don't check OpenSSL and Ruby OpenSSL versions here
   # for a flexible check for other SSL libraries such as LibreSSL and AWS-LC.
 
+  # Returns the algorithm name from the SubjectPublicKeyInfo of the key.
+  def key_algorithm_name(key)
+    OpenSSL::ASN1.decode(key.public_to_der).value.first.value.first.ln
+  end
+
   def omit_unless_support_ml_dsa_key
     unless support_ml_dsa_key?
       omit 'OpenSSL does not support ML-DSA'

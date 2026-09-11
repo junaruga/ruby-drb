@@ -54,7 +54,7 @@ class TestSSLConfig < Test::Unit::TestCase
 
     assert_equal([[OpenSSL::X509::Certificate, OpenSSL::PKey::PKey]],
                  certs.collect {|cert| cert.collect(&:class)})
-    assert_match(/type_name=ML-DSA-44/, certs[0][1].inspect)
+    assert_equal('ML-DSA-44', key_algorithm_name(certs[0][1]))
   end
 
   def test_setup_certificate_ml_dsa_65
@@ -70,7 +70,7 @@ class TestSSLConfig < Test::Unit::TestCase
 
     assert_equal([[OpenSSL::X509::Certificate, OpenSSL::PKey::PKey]],
                  certs.collect {|cert| cert.collect(&:class)})
-    assert_match(/type_name=ML-DSA-65/, certs[0][1].inspect)
+    assert_equal('ML-DSA-65', key_algorithm_name(certs[0][1]))
   end
 
   def test_setup_certificate_ml_dsa_87
@@ -86,7 +86,7 @@ class TestSSLConfig < Test::Unit::TestCase
 
     assert_equal([[OpenSSL::X509::Certificate, OpenSSL::PKey::PKey]],
                  certs.collect {|cert| cert.collect(&:class)})
-    assert_match(/type_name=ML-DSA-87/, certs[0][1].inspect)
+    assert_equal('ML-DSA-87', key_algorithm_name(certs[0][1]))
   end
 
   def test_setup_certificate_ml_dsa_65_rsa
@@ -105,7 +105,7 @@ class TestSSLConfig < Test::Unit::TestCase
                    [OpenSSL::X509::Certificate, OpenSSL::PKey::RSA]
                  ],
                  certs.collect {|cert| cert.collect(&:class)})
-    assert_match(/type_name=ML-DSA-65/, certs[0][1].inspect)
+    assert_equal('ML-DSA-65', key_algorithm_name(certs[0][1]))
   end
 
   def test_setup_certificate_invalid_algorithm
